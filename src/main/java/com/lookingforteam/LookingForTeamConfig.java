@@ -46,7 +46,7 @@ public interface LookingForTeamConfig extends Config
 	)
 	default String serverUrl()
 	{
-		return "http://localhost:8080";
+		return "https://osrs-lft.fly.dev";
 	}
 
 	@Range(min = 30, max = 600)
