@@ -18,7 +18,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -40,7 +39,6 @@ import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
-import net.runelite.client.events.RuneScapeProfileChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -88,12 +86,9 @@ public class LookingForTeamPlugin extends Plugin
 	private static final int REFRESH_SECONDS = 15;
 	private static final int MAX_EXTRA_REFRESHES_PER_MINUTE = 3;
 
-	/** Per-account (RuneScape profile) key holding saved selections, used only with "Remember selections". */
-	private static final String SAVED_SELECTIONS_KEY = "savedSelections";
-
 	private final MatchTracker matchTracker = new MatchTracker();
 
-	/** The raids you're looking for. In memory only, unless "Remember selections" saves them per account. */
+	/** The raids you're looking for. In memory only and cleared on logout, so you opt in fresh each session. */
 	private final Set<Activity> selected = EnumSet.noneOf(Activity.class); // guarded by itself
 
 	// Client thread only.
@@ -131,11 +126,6 @@ public class LookingForTeamPlugin extends Plugin
 			.panel(panel)
 			.build();
 		clientToolbar.addNavigation(navButton);
-
-		if (config.persistSelections() && client.getGameState() == GameState.LOGGED_IN)
-		{
-			clientThread.invokeLater(this::loadSavedSelections);
-		}
 
 		refreshFuture = executor.scheduleWithFixedDelay(this::requestRefresh, 0, REFRESH_SECONDS, TimeUnit.SECONDS);
 	}
@@ -199,7 +189,6 @@ public class LookingForTeamPlugin extends Plugin
 				selected.remove(activity);
 			}
 		}
-		saveSelections();
 		requestUserRefresh();
 	}
 
@@ -211,74 +200,29 @@ public class LookingForTeamPlugin extends Plugin
 		}
 	}
 
-	/**
-	 * Replaces the selections (e.g. clearing them), updates the panel and refreshes.
-	 *
-	 * @param save whether to also update the per-account saved copy
-	 */
-	private void replaceSelections(Set<Activity> activities, boolean save)
+	/** Clears all selections (logout, raid entry), updates the panel and refreshes. */
+	private void clearSelections()
 	{
 		synchronized (selected)
 		{
-			if (selected.equals(activities))
+			if (selected.isEmpty())
 			{
 				return;
 			}
 			selected.clear();
-			selected.addAll(activities);
-		}
-		if (save)
-		{
-			saveSelections();
 		}
 		syncPanelCheckboxes();
 		requestUserRefresh();
 	}
 
-	private void saveSelections()
-	{
-		if (!config.persistSelections())
-		{
-			return;
-		}
-		Set<Activity> current = selectedActivities();
-		if (current.isEmpty())
-		{
-			configManager.unsetRSProfileConfiguration(LookingForTeamConfig.GROUP, SAVED_SELECTIONS_KEY);
-		}
-		else
-		{
-			configManager.setRSProfileConfiguration(LookingForTeamConfig.GROUP, SAVED_SELECTIONS_KEY,
-				current.stream().map(Activity::name).collect(Collectors.joining(",")));
-		}
-	}
-
-	private void loadSavedSelections()
-	{
-		String saved = configManager.getRSProfileConfiguration(LookingForTeamConfig.GROUP, SAVED_SELECTIONS_KEY);
-		Set<Activity> activities = EnumSet.noneOf(Activity.class);
-		if (saved != null)
-		{
-			for (String name : saved.split(","))
-			{
-				Activity activity = Activity.fromWire(name.trim());
-				if (activity != null)
-				{
-					activities.add(activity);
-				}
-			}
-		}
-		replaceSelections(activities, false);
-	}
-
 	/**
 	 * Removes settings earlier development versions saved that are no longer used:
 	 * global selections (shared by every account on the same RuneLite profile),
-	 * and the removed Server URL and Refresh interval options.
+	 * and the removed Server URL, Refresh interval and Remember options.
 	 */
 	private void removeLegacySettings()
 	{
-		List<String> keys = new ArrayList<>(List.of("serverUrl", "refreshInterval"));
+		List<String> keys = new ArrayList<>(List.of("serverUrl", "refreshInterval", "persistSelections"));
 		for (Activity activity : Activity.values())
 		{
 			keys.add("activity." + activity.name());
@@ -323,29 +267,7 @@ public class LookingForTeamPlugin extends Plugin
 			clearPublishedStatus();
 		}
 
-		if ("persistSelections".equals(event.getKey()))
-		{
-			if (config.persistSelections())
-			{
-				saveSelections();
-			}
-			else
-			{
-				configManager.unsetRSProfileConfiguration(LookingForTeamConfig.GROUP, SAVED_SELECTIONS_KEY);
-			}
-		}
-
 		requestRefresh();
-	}
-
-	@Subscribe
-	public void onRuneScapeProfileChanged(RuneScapeProfileChanged event)
-	{
-		// Fires once the logged-in account is known, so per-account settings can be read.
-		if (config.persistSelections())
-		{
-			loadSavedSelections();
-		}
 	}
 
 	@Subscribe
@@ -360,9 +282,7 @@ public class LookingForTeamPlugin extends Plugin
 			generation.incrementAndGet();
 			clearPublishedStatus();
 			matchTracker.reset();
-			// Not saved: with "Remember selections" on, this account's saved copy is kept for next login,
-			// and the next account to log in gets its own.
-			replaceSelections(EnumSet.noneOf(Activity.class), false);
+			clearSelections();
 			updatePanel("Log in to see who's looking.", Collections.emptyList());
 		}
 	}
@@ -376,7 +296,7 @@ public class LookingForTeamPlugin extends Plugin
 		if (inRaid && !wasInRaid && !selectedActivities().isEmpty())
 		{
 			log.debug("Entered a raid, clearing LFT selections");
-			replaceSelections(EnumSet.noneOf(Activity.class), true);
+			clearSelections();
 			if (config.chatNotifications())
 			{
 				sendChatMessage("You entered a raid, so you're no longer listed as looking for a team.");

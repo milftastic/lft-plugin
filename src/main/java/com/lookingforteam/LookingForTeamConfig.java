@@ -7,7 +7,7 @@ import net.runelite.client.config.ConfigSection;
 
 /**
  * The raids you're looking for are edited from the side panel, not here. They're
- * kept in memory, and saved per account only with "Remember between logins".
+ * kept in memory only and cleared on logout, so you opt in fresh each session.
  */
 @ConfigGroup(LookingForTeamConfig.GROUP)
 public interface LookingForTeamConfig extends Config
@@ -58,21 +58,10 @@ public interface LookingForTeamConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "persistSelections",
-		name = "Remember between logins",
-		description = "Keep what you're looking for ticked after you log out.",
-		position = 3
-	)
-	default boolean persistSelections()
-	{
-		return false;
-	}
-
-	@ConfigItem(
 		keyName = "chatNotifications",
 		name = "Chat notifications",
 		description = "Post a chat message when a friend or clanmate is looking for something you're looking for",
-		position = 4
+		position = 3
 	)
 	default boolean chatNotifications()
 	{
