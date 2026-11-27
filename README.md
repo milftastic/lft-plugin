@@ -52,7 +52,6 @@ casual view and server logs but isn't strong anonymity.
 - **Your IP address** is seen by the server (as with any web request) and used
   only for rate limiting, in memory.
 - The server is open source: [lft-server](https://github.com/CHANGE-ME/lft-server).
-  You can also run your own and set *Server URL* to it.
 
 ## Server API (v1)
 

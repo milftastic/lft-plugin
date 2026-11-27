@@ -36,18 +36,6 @@ public interface LookingForTeamConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "serverUrl",
-		name = "Server URL",
-		description = "Base URL of the LFT server",
-		section = serverSection,
-		position = 1
-	)
-	default String serverUrl()
-	{
-		return "https://osrs-lft.fly.dev";
-	}
-
-	@ConfigItem(
 		keyName = "includeFriends",
 		name = "Check friends",
 		description = "Look up online friends",

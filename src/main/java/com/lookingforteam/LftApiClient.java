@@ -46,16 +46,21 @@ class LftApiClient
 	// Keeps one request reasonably sized; a full friends list (400) plus a clan (500) fits.
 	static final int MAX_KEYS = 1000;
 
+	/**
+	 * Everyone uses the same server, since you can only see friends on the same one.
+	 * Developers can point a client elsewhere (e.g. a local server) by starting it
+	 * with {@code -Dlft.serverUrl=http://localhost:8080}.
+	 */
+	private static final String SERVER_URL = System.getProperty("lft.serverUrl", "https://osrs-lft.fly.dev");
+
 	private final OkHttpClient http;
 	private final Gson gson;
-	private final LookingForTeamConfig config;
 
 	@Inject
-	LftApiClient(OkHttpClient http, Gson gson, LookingForTeamConfig config)
+	LftApiClient(OkHttpClient http, Gson gson)
 	{
 		this.http = http;
 		this.gson = gson;
-		this.config = config;
 	}
 
 	/** @param onComplete called once when done: with null on success, or an error message */
@@ -154,7 +159,7 @@ class LftApiClient
 
 	private HttpUrl endpoint(String path)
 	{
-		HttpUrl base = HttpUrl.parse(config.serverUrl().trim());
+		HttpUrl base = HttpUrl.parse(SERVER_URL.trim());
 		return base == null ? null : base.newBuilder().addPathSegments(path).build();
 	}
 

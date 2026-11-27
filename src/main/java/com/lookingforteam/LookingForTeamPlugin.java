@@ -121,7 +121,7 @@ public class LookingForTeamPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		removeLegacyGlobalSelections();
+		removeLegacySettings();
 
 		panel = new LookingForTeamPanel(this);
 		navButton = NavigationButton.builder()
@@ -272,14 +272,19 @@ public class LookingForTeamPlugin extends Plugin
 	}
 
 	/**
-	 * Earlier versions stored selections globally (shared by every account on the
-	 * same RuneLite profile). Remove those so they don't linger or sync.
+	 * Removes settings earlier development versions saved that are no longer used:
+	 * global selections (shared by every account on the same RuneLite profile),
+	 * and the removed Server URL and Refresh interval options.
 	 */
-	private void removeLegacyGlobalSelections()
+	private void removeLegacySettings()
 	{
+		List<String> keys = new ArrayList<>(List.of("serverUrl", "refreshInterval"));
 		for (Activity activity : Activity.values())
 		{
-			String key = "activity." + activity.name();
+			keys.add("activity." + activity.name());
+		}
+		for (String key : keys)
+		{
 			if (configManager.getConfiguration(LookingForTeamConfig.GROUP, key) != null)
 			{
 				configManager.unsetConfiguration(LookingForTeamConfig.GROUP, key);
