@@ -6,8 +6,8 @@ import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
 
 /**
- * Per-activity "looking for" toggles are stored in this group under
- * {@link Activity#configKey()} and edited from the side panel, not here.
+ * The raids you're looking for are edited from the side panel, not here. They're
+ * kept in memory, and saved per account only with "Remember between logins".
  */
 @ConfigGroup(LookingForTeamConfig.GROUP)
 public interface LookingForTeamConfig extends Config
@@ -71,9 +71,8 @@ public interface LookingForTeamConfig extends Config
 
 	@ConfigItem(
 		keyName = "persistSelections",
-		name = "Remember selections between logins",
-		description = "Keep what you're looking for ticked after you log out. "
-			+ "Off by default, so nobody stays listed as looking by accident.",
+		name = "Remember between logins",
+		description = "Keep what you're looking for ticked after you log out.",
 		position = 3
 	)
 	default boolean persistSelections()

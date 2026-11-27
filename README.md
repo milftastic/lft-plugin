@@ -21,8 +21,9 @@ So you only see someone who has you on their list **and** is on yours (or a
 shared clan). If A has B as a friend but B doesn't have A, neither sees the other.
 
 By default your selections are cleared when you log out, so being listed as
-looking always means you chose it this session. Turn on *Remember selections
-between logins* to keep them. Entering any raid also clears all your selections.
+looking always means you chose it this session. Turn on *Remember between
+logins* to keep them (saved separately for each of your accounts). Entering any
+raid also clears all your selections.
 
 When a friend or clanmate starts looking for something you're looking for, you
 get a green `[LFT]` chat message (turn off with *Chat notifications*).

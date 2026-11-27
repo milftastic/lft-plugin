@@ -58,12 +58,13 @@ class LftApiClient
 		this.config = config;
 	}
 
-	void publish(String id, Collection<String> keys, Set<Activity> activities, Consumer<String> onError)
+	/** @param onComplete called once when done: with null on success, or an error message */
+	void publish(String id, Collection<String> keys, Set<Activity> activities, Consumer<String> onComplete)
 	{
 		HttpUrl url = endpoint("v1/status");
 		if (url == null)
 		{
-			onError.accept("Invalid server URL");
+			onComplete.accept("Invalid server URL");
 			return;
 		}
 
@@ -82,7 +83,7 @@ class LftApiClient
 			public void onFailure(Call call, IOException e)
 			{
 				log.debug("LFT publish failed", e);
-				onError.accept("Can't reach server");
+				onComplete.accept("Can't reach server");
 			}
 
 			@Override
@@ -90,10 +91,7 @@ class LftApiClient
 			{
 				try (response)
 				{
-					if (!response.isSuccessful())
-					{
-						onError.accept(errorMessage(response.code()));
-					}
+					onComplete.accept(response.isSuccessful() ? null : errorMessage(response.code()));
 				}
 			}
 		});

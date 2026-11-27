@@ -7,7 +7,7 @@ import lombok.RequiredArgsConstructor;
  * Raids a player can be looking for a team for.
  * <p>
  * The enum constant names are the wire format sent to the server and the
- * config key suffix, so never rename one. Add new constants freely.
+ * saved-selection format, so never rename one. Add new constants freely.
  */
 @Getter
 @RequiredArgsConstructor
@@ -23,11 +23,6 @@ public enum Activity
 
 	private final String displayName;
 	private final String shortName;
-
-	String configKey()
-	{
-		return "activity." + name();
-	}
 
 	/**
 	 * @return the matching activity, or null for names this version doesn't know

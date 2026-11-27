@@ -18,6 +18,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -32,7 +33,6 @@ import net.runelite.api.clan.ClanChannelMember;
 import net.runelite.api.events.ClanChannelChanged;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
-import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatMessageBuilder;
 import net.runelite.client.chat.ChatMessageManager;
@@ -40,6 +40,7 @@ import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
+import net.runelite.client.events.RuneScapeProfileChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -85,27 +86,33 @@ public class LookingForTeamPlugin extends Plugin
 	 * Nothing is sent while you're not looking, so this only costs while you are.
 	 */
 	private static final int REFRESH_SECONDS = 15;
+	private static final int MAX_EXTRA_REFRESHES_PER_MINUTE = 3;
+
+	/** Per-account (RuneScape profile) key holding saved selections, used only with "Remember selections". */
+	private static final String SAVED_SELECTIONS_KEY = "savedSelections";
 
 	private final MatchTracker matchTracker = new MatchTracker();
 
+	/** The raids you're looking for. In memory only, unless "Remember selections" saves them per account. */
+	private final Set<Activity> selected = EnumSet.noneOf(Activity.class); // guarded by itself
+
 	// Client thread only.
 	private boolean wasInRaid;
-	private int lastRegion = -1;
-	private int lastToaParty = -1;
-	private int lastTfaParty = -1;
 
 	private LookingForTeamPanel panel;
 	private NavigationButton navButton;
 	private ScheduledFuture<?> refreshFuture;
 
-	private static final int MAX_EXTRA_REFRESHES_PER_MINUTE = 3;
-	// Guarded by this.
-	private final Deque<Long> recentUserRefreshes = new ArrayDeque<>();
-	private ScheduledFuture<?> pendingUserRefresh;
+	private final Object refreshLock = new Object();
+	private final Deque<Long> recentUserRefreshes = new ArrayDeque<>(); // guarded by refreshLock
+	private ScheduledFuture<?> pendingUserRefresh; // guarded by refreshLock
+
+	/** Publishes go out one at a time, newest wins, so they can't arrive out of order. */
+	private final LatestOnlySender<Publish> publisher = new LatestOnlySender<>(this::sendPublish);
 
 	/** Id we last published a status under, so we can clear it on logout. */
 	private volatile String publishedId;
-	/** Whether that last publish was "not looking". */
+	/** Whether that last publish was "not looking", so we don't repeat it every refresh. */
 	private volatile boolean publishedEmpty;
 
 	/** Bumped whenever results become stale (logout, disable) so late HTTP responses are dropped. */
@@ -114,11 +121,7 @@ public class LookingForTeamPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		// Covers the client being closed or crashing while logged in, where we never saw the login screen.
-		if (!config.persistSelections() && client.getGameState() != GameState.LOGGED_IN)
-		{
-			clearSelections();
-		}
+		removeLegacyGlobalSelections();
 
 		panel = new LookingForTeamPanel(this);
 		navButton = NavigationButton.builder()
@@ -129,7 +132,12 @@ public class LookingForTeamPlugin extends Plugin
 			.build();
 		clientToolbar.addNavigation(navButton);
 
-		scheduleRefresh();
+		if (config.persistSelections() && client.getGameState() == GameState.LOGGED_IN)
+		{
+			clientThread.invokeLater(this::loadSavedSelections);
+		}
+
+		refreshFuture = executor.scheduleWithFixedDelay(this::requestRefresh, 0, REFRESH_SECONDS, TimeUnit.SECONDS);
 	}
 
 	@Override
@@ -140,7 +148,7 @@ public class LookingForTeamPlugin extends Plugin
 			refreshFuture.cancel(false);
 			refreshFuture = null;
 		}
-		synchronized (this)
+		synchronized (refreshLock)
 		{
 			if (pendingUserRefresh != null)
 			{
@@ -151,7 +159,11 @@ public class LookingForTeamPlugin extends Plugin
 		}
 		generation.incrementAndGet();
 		clearPublishedStatus();
-		resetNotifications();
+		matchTracker.reset();
+		synchronized (selected)
+		{
+			selected.clear();
+		}
 		clientToolbar.removeNavigation(navButton);
 		navButton = null;
 		panel = null;
@@ -163,48 +175,131 @@ public class LookingForTeamPlugin extends Plugin
 		return configManager.getConfig(LookingForTeamConfig.class);
 	}
 
-	// ---- Activity selection (stored in config, edited from the panel) ----
+	// ---- Selections ----
 
 	boolean isLookingFor(Activity activity)
 	{
-		return Boolean.parseBoolean(configManager.getConfiguration(LookingForTeamConfig.GROUP, activity.configKey()));
+		synchronized (selected)
+		{
+			return selected.contains(activity);
+		}
 	}
 
+	/** Called by the panel's checkboxes. */
 	void setLookingFor(Activity activity, boolean lookingFor)
 	{
-		if (lookingFor)
+		synchronized (selected)
 		{
-			configManager.setConfiguration(LookingForTeamConfig.GROUP, activity.configKey(), true);
-		}
-		else
-		{
-			configManager.unsetConfiguration(LookingForTeamConfig.GROUP, activity.configKey());
-		}
-		// The resulting ConfigChanged event triggers a refresh.
-	}
-
-	private void clearSelections()
-	{
-		for (Activity activity : Activity.values())
-		{
-			if (isLookingFor(activity))
+			if (lookingFor)
 			{
-				configManager.unsetConfiguration(LookingForTeamConfig.GROUP, activity.configKey());
+				selected.add(activity);
+			}
+			else
+			{
+				selected.remove(activity);
 			}
 		}
+		saveSelections();
+		requestUserRefresh();
 	}
 
 	private Set<Activity> selectedActivities()
 	{
-		Set<Activity> selected = EnumSet.noneOf(Activity.class);
-		for (Activity activity : Activity.values())
+		synchronized (selected)
 		{
-			if (isLookingFor(activity))
+			return EnumSet.copyOf(selected);
+		}
+	}
+
+	/**
+	 * Replaces the selections (e.g. clearing them), updates the panel and refreshes.
+	 *
+	 * @param save whether to also update the per-account saved copy
+	 */
+	private void replaceSelections(Set<Activity> activities, boolean save)
+	{
+		synchronized (selected)
+		{
+			if (selected.equals(activities))
 			{
-				selected.add(activity);
+				return;
+			}
+			selected.clear();
+			selected.addAll(activities);
+		}
+		if (save)
+		{
+			saveSelections();
+		}
+		syncPanelCheckboxes();
+		requestUserRefresh();
+	}
+
+	private void saveSelections()
+	{
+		if (!config.persistSelections())
+		{
+			return;
+		}
+		Set<Activity> current = selectedActivities();
+		if (current.isEmpty())
+		{
+			configManager.unsetRSProfileConfiguration(LookingForTeamConfig.GROUP, SAVED_SELECTIONS_KEY);
+		}
+		else
+		{
+			configManager.setRSProfileConfiguration(LookingForTeamConfig.GROUP, SAVED_SELECTIONS_KEY,
+				current.stream().map(Activity::name).collect(Collectors.joining(",")));
+		}
+	}
+
+	private void loadSavedSelections()
+	{
+		String saved = configManager.getRSProfileConfiguration(LookingForTeamConfig.GROUP, SAVED_SELECTIONS_KEY);
+		Set<Activity> activities = EnumSet.noneOf(Activity.class);
+		if (saved != null)
+		{
+			for (String name : saved.split(","))
+			{
+				Activity activity = Activity.fromWire(name.trim());
+				if (activity != null)
+				{
+					activities.add(activity);
+				}
 			}
 		}
-		return selected;
+		replaceSelections(activities, false);
+	}
+
+	/**
+	 * Earlier versions stored selections globally (shared by every account on the
+	 * same RuneLite profile). Remove those so they don't linger or sync.
+	 */
+	private void removeLegacyGlobalSelections()
+	{
+		for (Activity activity : Activity.values())
+		{
+			String key = "activity." + activity.name();
+			if (configManager.getConfiguration(LookingForTeamConfig.GROUP, key) != null)
+			{
+				configManager.unsetConfiguration(LookingForTeamConfig.GROUP, key);
+			}
+		}
+	}
+
+	private void syncPanelCheckboxes()
+	{
+		Set<Activity> current = selectedActivities();
+		SwingUtilities.invokeLater(() ->
+		{
+			if (panel != null)
+			{
+				for (Activity activity : Activity.values())
+				{
+					panel.setSelected(activity, current.contains(activity));
+				}
+			}
+		});
 	}
 
 	// ---- Events ----
@@ -223,26 +318,29 @@ public class LookingForTeamPlugin extends Plugin
 			clearPublishedStatus();
 		}
 
-		if (event.getKey().startsWith("activity."))
+		if ("persistSelections".equals(event.getKey()))
 		{
-			// Keep the panel in sync if the value changed elsewhere (e.g. profile switch).
-			Activity activity = Activity.fromWire(event.getKey().substring("activity.".length()));
-			if (activity != null)
+			if (config.persistSelections())
 			{
-				boolean selected = isLookingFor(activity);
-				SwingUtilities.invokeLater(() ->
-				{
-					if (panel != null)
-					{
-						panel.setSelected(activity, selected);
-					}
-				});
+				saveSelections();
 			}
-			requestUserRefresh();
-			return;
+			else
+			{
+				configManager.unsetRSProfileConfiguration(LookingForTeamConfig.GROUP, SAVED_SELECTIONS_KEY);
+			}
 		}
 
 		requestRefresh();
+	}
+
+	@Subscribe
+	public void onRuneScapeProfileChanged(RuneScapeProfileChanged event)
+	{
+		// Fires once the logged-in account is known, so per-account settings can be read.
+		if (config.persistSelections())
+		{
+			loadSavedSelections();
+		}
 	}
 
 	@Subscribe
@@ -256,12 +354,11 @@ public class LookingForTeamPlugin extends Plugin
 		{
 			generation.incrementAndGet();
 			clearPublishedStatus();
-			resetNotifications();
-			if (!config.persistSelections())
-			{
-				clearSelections();
-			}
-			updatePanel("Log in to see who's looking.", Collections.emptyList(), Collections.emptySet());
+			matchTracker.reset();
+			// Not saved: with "Remember selections" on, this account's saved copy is kept for next login,
+			// and the next account to log in gets its own.
+			replaceSelections(EnumSet.noneOf(Activity.class), false);
+			updatePanel("Log in to see who's looking.", Collections.emptyList());
 		}
 	}
 
@@ -270,30 +367,15 @@ public class LookingForTeamPlugin extends Plugin
 	{
 		boolean inRaid = RaidDetector.inRaid(client);
 
-		if (log.isDebugEnabled())
-		{
-			// Raw values, to confirm the raid detection in-game.
-			int region = RaidDetector.currentRegion(client);
-			int toaParty = client.getVarbitValue(VarbitID.TOA_CLIENT_PARTYSTATUS);
-			int tfaParty = client.getVarbitValue(VarbitID.TFA_CLIENT_PARTYSTATUS);
-			if (region != lastRegion || toaParty != lastToaParty || tfaParty != lastTfaParty)
-			{
-				log.debug("LFT region={} instance={} toaParty={} tfaParty={} -> cox={} tob={} toa={} tfa={}",
-					region, client.getTopLevelWorldView().isInstance(), toaParty, tfaParty,
-					RaidDetector.inChambers(client), RaidDetector.inTheatre(client),
-					RaidDetector.inTombs(client), RaidDetector.inArchive(client));
-				lastRegion = region;
-				lastToaParty = toaParty;
-				lastTfaParty = tfaParty;
-			}
-		}
-
 		// Act only on the moment you go through the entrance, so you can still re-tick inside if you want.
 		if (inRaid && !wasInRaid && !selectedActivities().isEmpty())
 		{
 			log.debug("Entered a raid, clearing LFT selections");
-			clearSelections();
-			sendChatMessage("You entered a raid, so you're no longer listed as looking for a team.");
+			replaceSelections(EnumSet.noneOf(Activity.class), true);
+			if (config.chatNotifications())
+			{
+				sendChatMessage("You entered a raid, so you're no longer listed as looking for a team.");
+			}
 		}
 		wasInRaid = inRaid;
 	}
@@ -306,36 +388,34 @@ public class LookingForTeamPlugin extends Plugin
 
 	// ---- Refresh loop ----
 
-	private void scheduleRefresh()
-	{
-		refreshFuture = executor.scheduleWithFixedDelay(this::requestRefresh, 0, REFRESH_SECONDS, TimeUnit.SECONDS);
-	}
-
 	/**
-	 * Refresh soon after you tick or untick a raid. Clicks within half a second
+	 * Refresh soon after your selections change. Changes within half a second
 	 * are combined into one refresh, and at most {@link #MAX_EXTRA_REFRESHES_PER_MINUTE}
 	 * happen per minute on top of the regular schedule; beyond that the change goes
 	 * out with the next scheduled refresh.
 	 */
-	private synchronized void requestUserRefresh()
+	private void requestUserRefresh()
 	{
-		if (pendingUserRefresh != null && !pendingUserRefresh.isDone())
+		synchronized (refreshLock)
 		{
-			return; // one is already coming and will pick up this change too
-		}
+			if (pendingUserRefresh != null && !pendingUserRefresh.isDone())
+			{
+				return; // one is already coming and will pick up this change too
+			}
 
-		long now = System.currentTimeMillis();
-		while (!recentUserRefreshes.isEmpty() && now - recentUserRefreshes.peekFirst() > 60_000)
-		{
-			recentUserRefreshes.pollFirst();
-		}
-		if (recentUserRefreshes.size() >= MAX_EXTRA_REFRESHES_PER_MINUTE)
-		{
-			return;
-		}
+			long now = System.currentTimeMillis();
+			while (!recentUserRefreshes.isEmpty() && now - recentUserRefreshes.peekFirst() > 60_000)
+			{
+				recentUserRefreshes.pollFirst();
+			}
+			if (recentUserRefreshes.size() >= MAX_EXTRA_REFRESHES_PER_MINUTE)
+			{
+				return;
+			}
 
-		recentUserRefreshes.addLast(now);
-		pendingUserRefresh = executor.schedule(this::requestRefresh, 500, TimeUnit.MILLISECONDS);
+			recentUserRefreshes.addLast(now);
+			pendingUserRefresh = executor.schedule(this::requestRefresh, 500, TimeUnit.MILLISECONDS);
+		}
 	}
 
 	private void requestRefresh()
@@ -351,14 +431,14 @@ public class LookingForTeamPlugin extends Plugin
 		if (!config.enableOnline())
 		{
 			updatePanel("Online features are off. Turn on \"Enable online features\" in this plugin's settings.",
-				Collections.emptyList(), mine);
+				Collections.emptyList());
 			return;
 		}
 
 		Player local = client.getLocalPlayer();
 		if (client.getGameState() != GameState.LOGGED_IN || local == null || local.getName() == null)
 		{
-			updatePanel("Log in to see who's looking.", Collections.emptyList(), mine);
+			updatePanel("Log in to see who's looking.", Collections.emptyList());
 			return;
 		}
 
@@ -367,7 +447,7 @@ public class LookingForTeamPlugin extends Plugin
 		List<Candidate> candidates = collectCandidates(selfName);
 		int gen = generation.get();
 
-		// Publish: "each of these people may see my status (friends + clanmates).
+		// Publish: "each of these people (friends and clanmates) may see my status".
 		List<String> publishKeys = new ArrayList<>();
 		// Lookup: "has this friend allowed me to see theirs?", keyed back to the friend.
 		Map<String, Candidate> lookupKeys = new HashMap<>();
@@ -377,21 +457,20 @@ public class LookingForTeamPlugin extends Plugin
 			lookupKeys.put(NameHasher.visibilityKey(candidate.name, selfName), candidate);
 		}
 
-		// While not looking, only tell the server once; repeating "not looking" every minute is wasted traffic.
+		// While not looking, only tell the server once; repeating "not looking" every refresh is wasted traffic.
 		boolean alreadyCleared = mine.isEmpty() && publishedEmpty && selfId.equals(publishedId);
 		if (!alreadyCleared)
 		{
 			publishedId = selfId;
 			publishedEmpty = mine.isEmpty();
-			api.publish(selfId, publishKeys, mine, error -> updatePanel(error, null, mine));
+			publisher.submit(new Publish(selfId, publishKeys, mine, gen));
 		}
 
 		if (mine.isEmpty())
 		{
 			// You only see people who want what you want, so with nothing ticked there's nothing to look up.
 			matchTracker.update(Collections.emptyList(), mine);
-			updatePanel("Tick a raid above to see friends and clanmates looking for the same.",
-				Collections.emptyList(), mine);
+			updatePanel("Tick a raid above to see friends and clanmates looking for the same.", Collections.emptyList());
 			return;
 		}
 
@@ -427,7 +506,7 @@ public class LookingForTeamPlugin extends Plugin
 					}
 				}
 				updatePanel(entries.isEmpty() ? "No friends or clanmates online are looking for the same raids right now." : "",
-					entries, mine);
+					entries);
 
 				// Always track, even with chat off, so turning it on later doesn't replay old matches.
 				List<String> messages = matchTracker.update(entries, mine);
@@ -440,7 +519,7 @@ public class LookingForTeamPlugin extends Plugin
 			{
 				if (gen == generation.get())
 				{
-					updatePanel(error, null, mine);
+					updatePanel(error, null);
 				}
 			});
 	}
@@ -486,6 +565,59 @@ public class LookingForTeamPlugin extends Plugin
 		return new ArrayList<>(candidates.values());
 	}
 
+	// ---- Publishing ----
+
+	private void sendPublish(Publish publish, Runnable done)
+	{
+		api.publish(publish.id, publish.keys, publish.activities, error ->
+		{
+			if (error != null)
+			{
+				log.debug("LFT publish failed: {}", error);
+				if (publish.activities.isEmpty())
+				{
+					// Make sure a failed "not looking" is retried on the next refresh.
+					publishedEmpty = false;
+				}
+				if (publish.generation == generation.get())
+				{
+					updatePanel(error, null);
+				}
+			}
+			done.run();
+		});
+	}
+
+	private void clearPublishedStatus()
+	{
+		String id = publishedId;
+		publishedId = null;
+		publishedEmpty = false;
+		if (id != null)
+		{
+			publisher.submit(new Publish(id, Collections.emptyList(), EnumSet.noneOf(Activity.class), -1));
+		}
+	}
+
+	private static final class Publish
+	{
+		final String id;
+		final List<String> keys;
+		final Set<Activity> activities;
+		/** The generation it was made in; errors from older generations aren't shown. */
+		final int generation;
+
+		Publish(String id, List<String> keys, Set<Activity> activities, int generation)
+		{
+			this.id = id;
+			this.keys = keys;
+			this.activities = activities;
+			this.generation = generation;
+		}
+	}
+
+	// ---- UI ----
+
 	private void sendChatMessage(String text)
 	{
 		String message = new ChatMessageBuilder()
@@ -497,24 +629,8 @@ public class LookingForTeamPlugin extends Plugin
 			.build());
 	}
 
-	private void resetNotifications()
-	{
-		matchTracker.reset();
-	}
-
-	private void clearPublishedStatus()
-	{
-		String id = publishedId;
-		publishedId = null;
-		if (id != null)
-		{
-			api.publish(id, Collections.emptyList(), EnumSet.noneOf(Activity.class),
-				error -> log.debug("Failed to clear LFT status: {}", error));
-		}
-	}
-
 	/** @param entries null to leave the current list as is */
-	private void updatePanel(String status, List<LftEntry> entries, Set<Activity> mine)
+	private void updatePanel(String status, List<LftEntry> entries)
 	{
 		SwingUtilities.invokeLater(() ->
 		{
