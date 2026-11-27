@@ -4,8 +4,6 @@ import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
-import net.runelite.client.config.Range;
-import net.runelite.client.config.Units;
 
 /**
  * Per-activity "looking for" toggles are stored in this group under
@@ -47,21 +45,6 @@ public interface LookingForTeamConfig extends Config
 	default String serverUrl()
 	{
 		return "https://osrs-lft.fly.dev";
-	}
-
-	@Range(min = 10, max = 120)
-	@Units(Units.SECONDS)
-	@ConfigItem(
-		keyName = "refreshInterval",
-		name = "Refresh interval",
-		description = "How often to check for friends looking for the same raids. "
-			+ "Nothing is sent while you're not looking for anything.",
-		section = serverSection,
-		position = 2
-	)
-	default int refreshInterval()
-	{
-		return 15;
 	}
 
 	@ConfigItem(

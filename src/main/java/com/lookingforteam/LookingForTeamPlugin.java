@@ -77,7 +77,14 @@ public class LookingForTeamPlugin extends Plugin
 	@Inject
 	private ChatMessageManager chatMessageManager;
 
-	private static final Color CHAT_COLOR = new Color(0x00B000);
+	private static final Color CHAT_COLOR = new Color(0x008000);
+
+	/**
+	 * Fixed for everyone on purpose: how fast you see a friend's change depends on
+	 * their refresh rate, so a per-user setting would mostly affect other people.
+	 * Nothing is sent while you're not looking, so this only costs while you are.
+	 */
+	private static final int REFRESH_SECONDS = 15;
 
 	private final MatchTracker matchTracker = new MatchTracker();
 
@@ -210,12 +217,6 @@ public class LookingForTeamPlugin extends Plugin
 			return;
 		}
 
-		if ("refreshInterval".equals(event.getKey()))
-		{
-			scheduleRefresh();
-			return;
-		}
-
 		if ("enableOnline".equals(event.getKey()) && !config.enableOnline())
 		{
 			generation.incrementAndGet();
@@ -307,12 +308,7 @@ public class LookingForTeamPlugin extends Plugin
 
 	private void scheduleRefresh()
 	{
-		if (refreshFuture != null)
-		{
-			refreshFuture.cancel(false);
-		}
-		int interval = Math.max(10, config.refreshInterval());
-		refreshFuture = executor.scheduleWithFixedDelay(this::requestRefresh, 0, interval, TimeUnit.SECONDS);
+		refreshFuture = executor.scheduleWithFixedDelay(this::requestRefresh, 0, REFRESH_SECONDS, TimeUnit.SECONDS);
 	}
 
 	/**
