@@ -3,6 +3,11 @@
 Tick the raids (CoX, ToB, ToA, TFA) you want a team for, and see which of your online
 friends and clanmates are looking for the same ones.
 
+![Two friends' Looking For Team panels side by side](docs/screenshot.png)
+
+*Two friends, each looking for ToB plus something else. Each sees the other listed
+for ToB only, the raid they share, and gets a chat message when the match appears.*
+
 ## How it works
 
 The plugin talks to a small LFT server. Online features are **off by default**:
