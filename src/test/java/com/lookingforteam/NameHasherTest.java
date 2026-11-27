@@ -44,6 +44,16 @@ public class NameHasherTest
 	}
 
 	@Test
+	public void hiddenPlayersListIsForgiving()
+	{
+		// Same matching as everywhere else: case, spaces/underscores and stray whitespace don't matter.
+		assertEquals(java.util.Set.of("iron man", "zezima"),
+			NameHasher.normalizeList(" Iron_Man ,ZEZIMA,, ,iron man"));
+		assertEquals(java.util.Set.of(), NameHasher.normalizeList(""));
+		assertEquals(java.util.Set.of(), NameHasher.normalizeList(null));
+	}
+
+	@Test
 	public void idIsHexSha256()
 	{
 		assertEquals(64, NameHasher.hash("Zezima").length());

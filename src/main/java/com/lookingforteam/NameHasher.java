@@ -2,7 +2,9 @@ package com.lookingforteam;
 
 import com.google.common.hash.Hashing;
 import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Set;
 import net.runelite.client.util.Text;
 
 /**
@@ -28,6 +30,25 @@ final class NameHasher
 		return Text.toJagexName(name)
 			.toLowerCase(Locale.ROOT)
 			.replace('_', ' ');
+	}
+
+	/** Parses a comma-separated list of names into normalized names, ignoring blanks. */
+	static Set<String> normalizeList(String commaSeparated)
+	{
+		Set<String> names = new HashSet<>();
+		if (commaSeparated == null)
+		{
+			return names;
+		}
+		for (String part : commaSeparated.split(","))
+		{
+			String name = normalize(part).trim();
+			if (!name.isEmpty())
+			{
+				names.add(name);
+			}
+		}
+		return names;
 	}
 
 	/** Identifies a player's own status record on the server (so it can be replaced or cleared). */

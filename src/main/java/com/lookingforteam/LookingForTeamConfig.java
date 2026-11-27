@@ -58,10 +58,21 @@ public interface LookingForTeamConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "hiddenPlayers",
+		name = "Hidden players",
+		description = "Comma-separated names. They can't see when you're looking, and you won't see them.",
+		position = 3
+	)
+	default String hiddenPlayers()
+	{
+		return "";
+	}
+
+	@ConfigItem(
 		keyName = "chatNotifications",
 		name = "Chat notifications",
 		description = "Post a chat message when a friend or clanmate is looking for something you're looking for",
-		position = 3
+		position = 4
 	)
 	default boolean chatNotifications()
 	{

@@ -51,7 +51,9 @@ casual view and server logs but isn't strong anonymity.
   memory within about 6. There is no database, and the server's code doesn't
   log requests (the hosting provider may keep standard network logs).
 - **Who sees you:** only people who have you on their friends list *and* are on
-  yours, or who share your clan.
+  yours, or who share your clan. To exclude someone (for example a clanmate),
+  add their name to *Hidden players*: they won't see you, and you won't see
+  them. That list never leaves your client.
 - **Your IP address** is seen by the server (as with any web request) and used
   only for rate limiting, in memory.
 - The server is open source: [lft-server](https://github.com/milftastic/lft-server).

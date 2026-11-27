@@ -449,7 +449,7 @@ public class LookingForTeamPlugin extends Plugin
 			});
 	}
 
-	/** Online friends and clanmates, excluding yourself, merged by name. Client thread only. */
+	/** Online friends and clanmates, excluding yourself and hidden players, merged by name. Client thread only. */
 	private List<Candidate> collectCandidates(String selfName)
 	{
 		Map<String, Candidate> candidates = new HashMap<>();
@@ -487,6 +487,8 @@ public class LookingForTeamPlugin extends Plugin
 		}
 
 		candidates.remove(NameHasher.normalize(selfName));
+		// Hidden players get no key from us (so they can't see us) and aren't looked up (so we don't see them).
+		candidates.keySet().removeAll(NameHasher.normalizeList(config.hiddenPlayers()));
 		return new ArrayList<>(candidates.values());
 	}
 
