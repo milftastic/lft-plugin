@@ -46,7 +46,7 @@ import net.runelite.client.ui.NavigationButton;
 @Slf4j
 @PluginDescriptor(
 	name = "Looking For Team",
-	description = "Mark the raids you want a team for, and see which friends and clanmates want the same",
+	description = "Mark the raids you want a team for and see which friends and clanmates want the same",
 	tags = {"lft", "raids", "cox", "tob", "toa", "tfa", "team", "group", "friends", "clan"}
 )
 public class LookingForTeamPlugin extends Plugin
@@ -326,7 +326,7 @@ public class LookingForTeamPlugin extends Plugin
 		List<Candidate> candidates = collectCandidates(selfName);
 		int gen = generation.get();
 
-		// Publish: "each of these people may see my status".
+		// Publish: "each of these people may see my status (friends + clanmates).
 		List<String> publishKeys = new ArrayList<>();
 		// Lookup: "has this friend allowed me to see theirs?", keyed back to the friend.
 		Map<String, Candidate> lookupKeys = new HashMap<>();
@@ -343,6 +343,15 @@ public class LookingForTeamPlugin extends Plugin
 			publishedId = selfId;
 			publishedEmpty = mine.isEmpty();
 			api.publish(selfId, publishKeys, mine, error -> updatePanel(error, null, mine));
+		}
+
+		if (mine.isEmpty())
+		{
+			// You only see people who want what you want, so with nothing ticked there's nothing to look up.
+			matchTracker.update(Collections.emptyList(), mine);
+			updatePanel("Tick a raid above to see friends and clanmates looking for the same.",
+				Collections.emptyList(), mine);
+			return;
 		}
 
 		api.lookup(lookupKeys.keySet(),
@@ -369,12 +378,15 @@ public class LookingForTeamPlugin extends Plugin
 							activities.add(activity);
 						}
 					}
+					// Only the raids you're both looking for; people with none in common aren't shown.
+					activities.retainAll(mine);
 					if (!activities.isEmpty())
 					{
 						entries.add(new LftEntry(candidate.name, candidate.friend, candidate.clanmate, candidate.world, activities));
 					}
 				}
-				updatePanel(entries.isEmpty() ? "Nobody online is looking right now." : "", entries, mine);
+				updatePanel(entries.isEmpty() ? "No friends or clanmates online are looking for the same raids right now." : "",
+					entries, mine);
 
 				// Always track, even with chat off, so turning it on later doesn't replay old matches.
 				List<String> messages = matchTracker.update(entries, mine);
@@ -472,7 +484,7 @@ public class LookingForTeamPlugin extends Plugin
 			panel.setStatus(status);
 			if (entries != null)
 			{
-				panel.showEntries(entries, mine);
+				panel.showEntries(entries);
 			}
 		});
 	}

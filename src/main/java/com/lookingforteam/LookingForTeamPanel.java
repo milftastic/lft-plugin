@@ -8,7 +8,6 @@ import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
@@ -77,26 +76,24 @@ class LookingForTeamPanel extends PluginPanel
 		statusLabel.setText(text);
 	}
 
-	void showEntries(List<LftEntry> entries, Set<Activity> mine)
+	/** @param entries people looking for at least one raid you're looking for, with only the shared raids */
+	void showEntries(List<LftEntry> entries)
 	{
 		resultsPanel.removeAll();
 
-		// People who want something you want go first, then alphabetical.
 		List<LftEntry> sorted = new ArrayList<>(entries);
-		sorted.sort(Comparator
-			.comparing((LftEntry e) -> !overlaps(e.getActivities(), mine))
-			.thenComparing(e -> e.getName().toLowerCase()));
+		sorted.sort(Comparator.comparing(e -> e.getName().toLowerCase()));
 
 		for (LftEntry entry : sorted)
 		{
-			resultsPanel.add(entryRow(entry, mine));
+			resultsPanel.add(entryRow(entry));
 		}
 
 		resultsPanel.revalidate();
 		resultsPanel.repaint();
 	}
 
-	private JPanel entryRow(LftEntry entry, Set<Activity> mine)
+	private JPanel entryRow(LftEntry entry)
 	{
 		JPanel row = new JPanel();
 		row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
@@ -108,10 +105,7 @@ class LookingForTeamPanel extends PluginPanel
 
 		JLabel name = new JLabel(entry.getName());
 		name.setFont(FontManager.getRunescapeBoldFont());
-		if (overlaps(entry.getActivities(), mine))
-		{
-			name.setForeground(MATCH_COLOR);
-		}
+		name.setForeground(MATCH_COLOR);
 		row.add(name);
 
 		String source = entry.isFriend() && entry.isClanmate() ? "Friend, clan"
@@ -123,16 +117,11 @@ class LookingForTeamPanel extends PluginPanel
 
 		String activities = entry.getActivities().stream()
 			.sorted()
-			.map(a -> mine.contains(a) ? "<b>" + a.getShortName() + "</b>" : a.getShortName())
+			.map(Activity::getShortName)
 			.collect(Collectors.joining(", "));
 		row.add(new JLabel("<html><body style='width:150px'>" + activities + "</body></html>"));
 
 		return row;
-	}
-
-	private static boolean overlaps(Set<Activity> theirs, Set<Activity> mine)
-	{
-		return theirs.stream().anyMatch(mine::contains);
 	}
 
 	private static JLabel header(String text)
