@@ -18,7 +18,6 @@ public enum Activity
 	TOB("Theatre of Blood", "ToB"),
 	TOB_HM("Theatre of Blood: HM", "HMT"),
 	TOA("Tombs of Amascut", "ToA"),
-	TOA_EXPERT("Tombs of Amascut: Expert", "Expert ToA"),
 	TFA("The Fractured Archive", "TFA");
 
 	private final String displayName;
