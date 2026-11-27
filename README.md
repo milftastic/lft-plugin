@@ -40,9 +40,12 @@ casual view and server logs but isn't strong anonymity.
 - **What's sent, while online features are on:** your raid choices, a hash of
   your own name, and opaque hashed keys for your *online* friends and
   clanmates (only while you're looking). Plain names are never sent.
-- **What the server keeps:** only that, in memory, for at most 5 minutes after
-  your last refresh. There is no database and nothing is logged per player.
-  Logging out, turning off the plugin or entering a raid clears it right away.
+- **What the server keeps:** only that, in memory, replaced on every refresh.
+  Logging out, unticking everything, turning off the plugin or entering a raid
+  deletes it right away. If your client can't say goodbye (crash, lost
+  connection), it's hidden 5 minutes after your last refresh and deleted from
+  memory within about 6. There is no database, and the server's code doesn't
+  log requests (the hosting provider may keep standard network logs).
 - **Who sees you:** only people who have you on their friends list *and* are on
   yours, or who share your clan.
 - **Your IP address** is seen by the server (as with any web request) and used
