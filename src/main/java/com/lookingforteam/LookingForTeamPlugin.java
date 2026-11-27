@@ -113,6 +113,13 @@ public class LookingForTeamPlugin extends Plugin
 	/** Bumped whenever results become stale (logout, disable) so late HTTP responses are dropped. */
 	private final AtomicInteger generation = new AtomicInteger();
 
+	/**
+	 * Bumped on every refresh. A lookup reply is only applied if no newer refresh has
+	 * started since, so a slow reply from before you unticked a raid can't bring a
+	 * friend back into the panel or repeat a chat message.
+	 */
+	private final AtomicInteger refreshSeq = new AtomicInteger();
+
 	@Override
 	protected void startUp()
 	{
@@ -293,14 +300,11 @@ public class LookingForTeamPlugin extends Plugin
 		boolean inRaid = RaidDetector.inRaid(client);
 
 		// Act only on the moment you go through the entrance, so you can still re-tick inside if you want.
+		// Unticks quietly: the panel shows it, no chat message.
 		if (inRaid && !wasInRaid && !selectedActivities().isEmpty())
 		{
 			log.debug("Entered a raid, clearing LFT selections");
 			clearSelections();
-			if (config.chatNotifications())
-			{
-				sendChatMessage("You entered a raid, so you're no longer listed as looking for a team.");
-			}
 		}
 		wasInRaid = inRaid;
 	}
@@ -351,7 +355,15 @@ public class LookingForTeamPlugin extends Plugin
 
 	private void refresh()
 	{
+		int seq = refreshSeq.incrementAndGet(); // any lookup still in flight is now stale
 		Set<Activity> mine = selectedActivities();
+
+		GameState state = client.getGameState();
+		if (state == GameState.HOPPING || state == GameState.LOADING)
+		{
+			// Mid world hop or loading: keep the panel as it is instead of flashing "Log in…".
+			return;
+		}
 
 		if (!config.enableOnline())
 		{
@@ -361,7 +373,7 @@ public class LookingForTeamPlugin extends Plugin
 		}
 
 		Player local = client.getLocalPlayer();
-		if (client.getGameState() != GameState.LOGGED_IN || local == null || local.getName() == null)
+		if (state != GameState.LOGGED_IN || local == null || local.getName() == null)
 		{
 			updatePanel("Log in to see who's looking.", Collections.emptyList());
 			return;
@@ -402,7 +414,7 @@ public class LookingForTeamPlugin extends Plugin
 		api.lookup(lookupKeys.keySet(),
 			statuses ->
 			{
-				if (gen != generation.get())
+				if (gen != generation.get() || seq != refreshSeq.get())
 				{
 					return;
 				}
@@ -442,7 +454,7 @@ public class LookingForTeamPlugin extends Plugin
 			},
 			error ->
 			{
-				if (gen == generation.get())
+				if (gen == generation.get() && seq == refreshSeq.get())
 				{
 					updatePanel(error, null);
 				}
