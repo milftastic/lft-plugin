@@ -49,18 +49,19 @@ public interface LookingForTeamConfig extends Config
 		return "https://osrs-lft.fly.dev";
 	}
 
-	@Range(min = 30, max = 600)
+	@Range(min = 10, max = 120)
 	@Units(Units.SECONDS)
 	@ConfigItem(
 		keyName = "refreshInterval",
 		name = "Refresh interval",
-		description = "How often to refresh statuses",
+		description = "How often to check for friends looking for the same raids. "
+			+ "Nothing is sent while you're not looking for anything.",
 		section = serverSection,
 		position = 2
 	)
 	default int refreshInterval()
 	{
-		return 60;
+		return 15;
 	}
 
 	@ConfigItem(

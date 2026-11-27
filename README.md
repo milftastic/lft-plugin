@@ -8,7 +8,7 @@ friends and clanmates are looking for the same ones.
 The plugin talks to a small LFT server. Online features are **off by default**:
 turn on *Enable online features* in the plugin settings to use them.
 
-Every refresh (default 60s), the plugin:
+Every refresh (default every 15 seconds, while you have a raid ticked), the plugin:
 
 1. Publishes **your** status: the raids you ticked, plus one opaque key per
    online friend and clanmate saying "this person may see my status"

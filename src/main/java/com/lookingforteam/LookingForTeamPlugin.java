@@ -5,8 +5,10 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
@@ -89,6 +91,11 @@ public class LookingForTeamPlugin extends Plugin
 	private NavigationButton navButton;
 	private ScheduledFuture<?> refreshFuture;
 
+	private static final int MAX_EXTRA_REFRESHES_PER_MINUTE = 3;
+	// Guarded by this.
+	private final Deque<Long> recentUserRefreshes = new ArrayDeque<>();
+	private ScheduledFuture<?> pendingUserRefresh;
+
 	/** Id we last published a status under, so we can clear it on logout. */
 	private volatile String publishedId;
 	/** Whether that last publish was "not looking". */
@@ -125,6 +132,15 @@ public class LookingForTeamPlugin extends Plugin
 		{
 			refreshFuture.cancel(false);
 			refreshFuture = null;
+		}
+		synchronized (this)
+		{
+			if (pendingUserRefresh != null)
+			{
+				pendingUserRefresh.cancel(false);
+				pendingUserRefresh = null;
+			}
+			recentUserRefreshes.clear();
 		}
 		generation.incrementAndGet();
 		clearPublishedStatus();
@@ -221,6 +237,8 @@ public class LookingForTeamPlugin extends Plugin
 					}
 				});
 			}
+			requestUserRefresh();
+			return;
 		}
 
 		requestRefresh();
@@ -293,8 +311,35 @@ public class LookingForTeamPlugin extends Plugin
 		{
 			refreshFuture.cancel(false);
 		}
-		int interval = Math.max(30, config.refreshInterval());
+		int interval = Math.max(10, config.refreshInterval());
 		refreshFuture = executor.scheduleWithFixedDelay(this::requestRefresh, 0, interval, TimeUnit.SECONDS);
+	}
+
+	/**
+	 * Refresh soon after you tick or untick a raid. Clicks within half a second
+	 * are combined into one refresh, and at most {@link #MAX_EXTRA_REFRESHES_PER_MINUTE}
+	 * happen per minute on top of the regular schedule; beyond that the change goes
+	 * out with the next scheduled refresh.
+	 */
+	private synchronized void requestUserRefresh()
+	{
+		if (pendingUserRefresh != null && !pendingUserRefresh.isDone())
+		{
+			return; // one is already coming and will pick up this change too
+		}
+
+		long now = System.currentTimeMillis();
+		while (!recentUserRefreshes.isEmpty() && now - recentUserRefreshes.peekFirst() > 60_000)
+		{
+			recentUserRefreshes.pollFirst();
+		}
+		if (recentUserRefreshes.size() >= MAX_EXTRA_REFRESHES_PER_MINUTE)
+		{
+			return;
+		}
+
+		recentUserRefreshes.addLast(now);
+		pendingUserRefresh = executor.schedule(this::requestRefresh, 500, TimeUnit.MILLISECONDS);
 	}
 
 	private void requestRefresh()
